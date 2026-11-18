@@ -31,4 +31,7 @@ KC_METRICS_ENABLED=true
 # Logging
 KC_LOG_LEVEL=info
 
+# Security: Java4Shell mitigation (disables the JVM's Base64 intrinsics)
+JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics
+
 
