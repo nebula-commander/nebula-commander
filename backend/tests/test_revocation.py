@@ -19,7 +19,7 @@ import pytest_asyncio
 import yaml
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.api import certificates as certificates_api
@@ -48,7 +48,15 @@ async def api(tmp_path, monkeypatch):
 
     monkeypatch.setattr(nodes_api, "_verify_reauth_or_403", _no_reauth)
 
+    async def _reauth_ok(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(networks_api, "verify_reauth", _reauth_ok)
+    monkeypatch.setattr("backend.auth.reauth.decode_reauth_token", lambda _t: {"sub": OWNER.sub, "challenge": "x"})
+
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'test.db'}")
+    # Enforce foreign keys like production (database.py) so dangling references fail here too.
+    event.listen(engine.sync_engine, "connect", lambda conn, _: conn.execute("PRAGMA foreign_keys=ON"))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -223,3 +231,14 @@ async def test_quarantine_expires_and_frees_the_address(api):
         await s.commit()
     c = await _create(api, "node-c", suggested_ip=ip_a)
     assert (await _node(api, c)).ip_address == ip_a
+
+
+@pytest.mark.asyncio
+async def test_network_with_blocklist_entries_can_be_deleted(api):
+    _, a, _ = await _setup(api)
+    await api.post(f"/api/nodes/{a}/revoke-certificate", json={"reauth_token": "x", "confirmation": "node-a"})
+    r = await api.request("DELETE", "/api/networks/1", json={"reauth_token": "x", "confirmation": "net"})
+    assert r.status_code < 300, r.text
+    async with api.sessions() as s:
+        assert (await s.scalar(select(Network))) is None
+        assert (await s.scalar(select(BlockedCertificate))) is None

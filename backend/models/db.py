@@ -59,6 +59,9 @@ class Network(Base):
     invitations: Mapped[list["Invitation"]] = relationship(
         "Invitation", back_populates="network", cascade="all, delete-orphan"
     )
+    blocked_certificates: Mapped[list["BlockedCertificate"]] = relationship(
+        "BlockedCertificate", cascade="all, delete-orphan"
+    )
 
 
 class NetworkGroupFirewall(Base):
